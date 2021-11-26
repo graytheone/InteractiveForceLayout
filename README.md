@@ -11,3 +11,7 @@ https://bl.ocks.org/xswei/cdf09e3761bce41a21f87445fa2b3944
 dataset: miserables.json
 
 d3.js: v5+
+
+other material:
+1. http://bl.ocks.org/rkirsling/5001347
+2. http://bl.ocks.org/sebbacon/6138241
