@@ -15,3 +15,4 @@ other material:
 1. http://bl.ocks.org/rkirsling/5001347 (与下同理)
 2. http://bl.ocks.org/sebbacon/6138241 (Click-to-edit force directed graph in d3)
 3. https://bl.ocks.org/mbostock/1062288 (树图的节点展开和收缩)
+4. https://gist.github.com/GerHobbelt/3104394/585e0ba27af8abde56d5064e2eeb318d263b68e4 (多类型边的节点扩展和收缩)
