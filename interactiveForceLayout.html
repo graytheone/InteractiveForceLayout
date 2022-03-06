@@ -143,8 +143,8 @@
             })
             .attr("value", function (d) { return d; })
 
-        //read data
-        d3.json("miserables.json").then(function (forceGraph) {
+        //读取数据
+        d3.json("./data/demo1-miserables.json").then(function (forceGraph) {
 
             var nodesArray = forceGraph.nodes;
             var linksArray = forceGraph.links;
