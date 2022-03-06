@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>唉</title>
+    <script src="https://d3js.org/d3.v5.js"></script>
+    <style type="text/css">
+        svg {
+            border: 1px solid #ccc;
+            transform: scale(1);
+        }
+
+        body {
+            font: 10px sans-serif;
+        }
+
+        circle.node {
+            fill: lightsteelblue;
+            stroke: #555;
+            stroke-width: 3px;
+        }
+
+        circle.leaf {
+            stroke: #fff;
+            stroke-width: 1.5px;
+        }
+
+        path.hull {
+            fill: lightsteelblue;
+            fill-opacity: 0.3;
+        }
+
+        line.link {
+            stroke: #333;
+            stroke-opacity: 0.5;
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body>
+    <script>
+        //创建画布
+        var width = 2000, height = 1000;
+        var body = d3.select("body");
+        var vis = body.append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        vis.attr("opacity", 1e-6)
+            .transition()
+            .duration(1000)
+            .attr("opacity", 1);
+
+        var nodeMap = {};
+        var linkMap = {};
+        var expanded = new Map();
+
+        var link, node, hull, offset = 1;
+        var simulation;
+
+        var curve = d3.line().curve(d3.curveCardinalClosed.tension(.85));
+        var fill = d3.scaleOrdinal(d3.schemeCategory10);
+        function getGroup(n) { return n.group; } //返回节点的组名
+        function drawCluster(d) { return curve(d.path); }
+
+
+        d3.json("./dataset/miserables.json").then(function (data) {
+            //将每条连边的source和target设置为节点对象本身
+            for (let i = 0; i < data.links.length; ++i) {
+                o = data.links[i];
+                o.source = data.nodes.find(obj => obj.name === o.source);
+                o.target = data.nodes.find(obj => obj.name === o.target);
+            }
+            hullg = vis.append("g");
+            linkg = vis.append("g");
+            nodeg = vis.append("g");
+            //初始化
+            groupedData = setGroup(data);
+            simulation = d3.forceSimulation(groupedData.nodes)
+                .on("tick", function () {
+                    if (!hull.empty()) {
+                        hull.data(convexHulls(groupedData.nodes))
+                            .attr("d", drawCluster);
+                    }
+                    var nodeElements = vis.selectAll(".node");
+                    var linkElements = vis.selectAll(".link");
+                    nodeElements.attr("cx", function (d, i) { return d.x; })
+                        .attr("cy", function (d) { return d.y; })
+                    linkElements.attr("x1", function (d) { return d.source.x; })
+                        .attr("y1", function (d) { return d.source.y; })
+                        .attr("x2", function (d) { return d.target.x; })
+                        .attr("y2", function (d) { return d.target.y; });
+
+                })
+            simulation.force("link", d3.forceLink(groupedData.links)
+                .id(function (d) { return d.group }).distance(100))
+                .force("charge", d3.forceManyBody().strength(-50))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force("x", d3.forceX(width / 2))
+                .force("y", d3.forceY(height / 2))
+            draw();
+        });
+
+        /**
+         * 初始化
+         * 输入：数据集
+         * 输出：经过分组的数据集
+         */
+        function setGroup(data) {
+            var nodes = [], // 输出节点：output nodes
+                links = []; // 输出连边：output links
+
+            for (let k = 0; k < data.nodes.length; k++) {
+                var n = data.nodes[k],//节点k
+                    i = getGroup(n);//返回节点的组名;
+
+                if (typeof (i) == 'object') {
+                    n.group = i[0];
+                    i = i[0];
+                };
+
+                var g = nodeMap[i] || (nodeMap[i] = { group: i, size: 0, nodes: [], links: [] });
+
+                if (g.size == 0) { //如果当前节点不属于任何一个组，则建立新的组
+                    nodes.push(g);
+                    expanded.set(i, false);
+                }
+                g.size++;
+                g.nodes.push(n);
+            }
+
+            for (let k = 0; k < data.links.length; k++) {
+                var e = data.links[k], //某条边e
+                    u = getGroup(e.source), //获得边的起点属于的组
+                    v = getGroup(e.target); //获得边的终点属于的组
+                if (typeof (u) == 'object') {
+                    u = u[0];
+                }
+                if (typeof (v) == 'object') {
+                    v = v[0];
+                }
+                //将连边e加入连边两端节点所属的组节点中
+                nodeMap[u].links.push(e);
+                nodeMap[v].links.push(e);
+
+                if (u != v) {
+                    //组a->组b之间的连边关系，从group小的那个值->group大的那个值，节点收缩后 组连边不存在'方向'
+                    var i = (u < v ? u + "|" + v : v + "|" + u),
+                        l = linkMap[i] || (linkMap[i] = { source: u, target: v, size: 0 }); //组
+                    if (l.size == 0) links.push(l);
+                    l.size++;
+                }
+            }
+            return { nodes: nodes, links: links };
+        }
+
+        /**
+        * 展开超点
+        * 输入： d(超点)，i(超点在对象数组中的index)
+        */
+        function expand(d, i) {
+            var allNodeLen = groupedData.nodes.length,
+                allLinkLen = groupedData.links.length,
+                dNodeLen = d.nodes.length,
+                dLinkLen = d.links.length;
+
+            groupedData.nodes.splice(groupedData.nodes.findIndex(e => e.group === d.group), 1)
+
+            for (let k = 0; k < dNodeLen; k++) {
+                let snode = d.nodes[k];
+                snode.size = 1;
+                snode.x = d.x + Math.random(), snode.y = d.y + Math.random(); //节点的位置
+                snode.vx = Math.random(), snode.vy = Math.random(); //节点的移动速度
+                groupedData.nodes.push(snode);
+            }
+
+            //删掉了关于超点的连边
+            groupedData.links = groupedData.links.filter(item => item.source.group != d.group && item.target.group != d.group)
+
+            var linkList = [];
+            var otherNodeGroup = 0;
+            var map = new Map();
+            for (let k = 0; k < dLinkLen; k++) {
+                let SourceOrTargetBelongsToThisGroup = (d.links[k].source.group == d.group);
+                let slink = {};
+                slink.size = 1;
+                if (SourceOrTargetBelongsToThisGroup) {
+                    slink.source = d.links[k].source, otherNodeGroup = d.links[k].target.group;
+                } else { slink.target = d.links[k].target; otherNodeGroup = d.links[k].source.group; }
+                if (typeof (otherNodeGroup) == 'object') otherNodeGroup = otherNodeGroup[0];
+                //如果另一个端点所对应的组也展开了，直接添加。包括了两个部分：在同一组/不在同一组但双方都展开，由于两个节点之间的单向边只会有一条，所以ok
+                if (expanded.get(otherNodeGroup)) {
+                    if (SourceOrTargetBelongsToThisGroup) slink.target = d.links[k].target;
+                    else slink.source = d.links[k].source;
+                    groupedData.links.push(slink);
+                } else {//如果另一个端点所对应的组未展开，
+                    slink.size = 1;
+                    if (SourceOrTargetBelongsToThisGroup) {
+                        slink.target = nodeMap[d.links[k].target.group];
+                    } else {
+                        slink.source = nodeMap[d.links[k].source.group];
+                    }
+                    var flag = 1; //遍历linkList，查看有没有重复的，如果有则size+1，没有就新建。
+                    for (let x = 0; x < linkList.length; x++) {
+                        if (linkList[x].source == slink.source && linkList[x].target == slink.target) {
+                            linkList[x].size++;
+                            flag = 0;
+                        }
+                    }
+                    if (flag) { linkList.push(slink); }
+                }
+            }
+            for (i in linkList) { groupedData.links.push(linkList[i]) }
+        }
+
+        /**
+        * 关闭超点
+        * 输入： d(超点)，i(超点在对象数组中的index)
+        */
+        function collapse(d, i) {
+            var newNodes = [];
+            var newLinks = [];
+            for (let k = 0; k < groupedData.nodes.length; k++) {
+                if (groupedData.nodes[k].group != d.group) {
+                    newNodes.push(groupedData.nodes[k]);
+                }
+            }
+            var x = 0, y = 0; //需要计算节点集的质心
+            var n = nodeMap[d.group];
+            var len = n.nodes.length;
+            for (let k = 0; k < len; k++) {
+                x += n.nodes[k].x;
+                y += n.nodes[k].y;
+            }
+            n.fx = x / len, n.fy = y / len;
+            newNodes.push(n); //添加点击组节点
+            groupedData.nodes = newNodes;
+
+            var otherNodeGroup = 0;
+            var linkList1 = [];
+            var linkList2 = [];
+            var mapEndClosed = new Map();//用来判断左右两点同在某个组内的连边是否重复添加
+            //遍历所有连边，判断是否有节点在组内
+            for (let k = 0; k < groupedData.links.length; k++) {
+                if (groupedData.links[k].source.group == d.group || groupedData.links[k].target.group == d.group) {
+                    let slink = {}, otherNodeGroup = 0;
+                    slink.size = 1;
+                    if (groupedData.links[k].source.group == d.group && groupedData.links[k].target.group == d.group)
+                        continue;//两端都为本组，直接删掉
+                    let SourceOrTargetBelongsToThisGroup = groupedData.links[k].source.group == d.group;//判断是连边的源节点还是目标节点为本组节点
+                    if (SourceOrTargetBelongsToThisGroup) {
+                        slink.target = groupedData.links[k].target;
+                        otherNodeGroup = groupedData.links[k].target.group;
+                    } else {
+                        slink.source = groupedData.links[k].source;
+                        otherNodeGroup = groupedData.links[k].source.group;
+                    }
+                    if (typeof (otherNodeGroup) == 'object') otherNodeGroup = otherNodeGroup[0];
+                    if (expanded.get(otherNodeGroup)) { //终端已展开
+                        var ths = nodeMap[d.group];
+                        if (SourceOrTargetBelongsToThisGroup) {
+                            slink.source = ths;
+                        } else {
+                            slink.target = ths;
+                        }
+                        var flag = 1; //遍历linkList，查看有没有重复的，如果有则size+1，没有就新建。
+                        for (let x = 0; x < linkList1.length; x++) {
+                            if (linkList1[x].source == slink.source && linkList1[x].target == slink.target) {
+                                linkList1[x].size++;
+                                flag = 0;
+                            }
+                        }
+                        if (flag) { linkList1.push(slink); }
+                    } else {//终端未展开, 则添加超点start和超点end之间的连边，且只添加一次
+                        if (d.group == otherNodeGroup)
+                            continue;
+                        let s = d.group < otherNodeGroup ? d.group + "|" + otherNodeGroup : otherNodeGroup + "|" + d.group;
+                        if (!mapEndClosed.has(s)) {
+                            mapEndClosed.set(s, true);
+                            linkList2.push(linkMap[s])
+                        }
+                    }
+                }
+                else {//没有则照常显示，添加到newLinks里
+                    newLinks.push(groupedData.links[k]);
+                }
+            }
+            for (i in linkList1) newLinks.push(linkList1[i])
+            for (i in linkList2) newLinks.push(linkList2[i])
+            groupedData.links = newLinks;
+        }
+        
+        /**
+        * 绘制超点轮廓
+        */        
+        function convexHulls(nodes) {
+            var hulls = {};
+            // create point sets
+            for (var k = 0; k < nodes.length; ++k) {
+                var n = nodes[k];
+                var i = getGroup(n);
+                if(!expanded.get(i)) //对展开了的节点集进行绘制
+                    continue;
+                var temp = hulls[i] || (hulls[i] = []);
+                temp.push([n.x - offset, n.y - offset]);
+                temp.push([n.x - offset, n.y + offset]);
+                temp.push([n.x + offset, n.y - offset]);
+                temp.push([n.x + offset, n.y + offset]);
+            }
+            // create convex hulls
+            var hullset = [];
+            for (i in hulls) {
+                hullset.push({ group: i, path: d3.polygonHull(hulls[i]) });
+            }
+            return hullset;
+        }
+        /**
+        * 重新绘制画布上的布局
+        * 输入： d(超点)，i(超点在对象数组中的index)
+        */
+        function draw() {
+            //每次重新绘制都需要重新绑定数据，否则会出错！
+            simulation.force("link", d3.forceLink(groupedData.links))
+            simulation.nodes(groupedData.nodes);
+
+            hullg.selectAll("path.hull").remove();
+            hull = hullg.selectAll("path.hull")
+                .data(convexHulls(groupedData.nodes))
+                .enter().append("path")
+                .attr("class", "hull")
+                .attr("d", drawCluster)
+                .style("fill", function (d) { return fill(d.group); })
+                .on("click", function (d, i) {//当点击hull轮廓内的阴影，节点集也户收缩
+                    if(expanded.get(d.group)){
+                        expanded.set(d.group, false);
+                        console.log("点击了hull，属于", d.group, ",想要收缩");
+                        collapse(d, i);
+                        draw();                     
+                    }
+                });
+
+            //对节点进行更新
+            link = linkg.selectAll("line.link").data(groupedData.links);
+            link.exit().remove();
+            link.enter().append("line")
+                .attr("class", "link")
+                .attr("x1", function (d) { return d.source.x; })
+                .attr("y1", function (d) { return d.source.y; })
+                .attr("x2", function (d) { return d.target.x; })
+                .attr("y2", function (d) { return d.target.y; })
+                .style("stroke-width", function (d) { return 1; });
+
+            node = nodeg.selectAll("circle.node").data(groupedData.nodes);//绑定数据后 返回前后两个节点集的交集 aka.更新部分
+            //1.首先对update部分的节点进行样式上的更新
+            node.attr("r", function (d) {
+                if (d.size >= 0) return Math.ceil(Math.log(d.size)) + 5;
+                else return 5;
+            })
+                .style("stroke", function (d) {
+                    if (d.size > 1) return "black";
+                    return "white";
+                })
+            //2.将删掉的节点，移出画布
+            node.exit().remove();
+            //3.为缺少的circle append 绘制
+            node.enter().append("circle")
+                .attr("class", function (d) { return "node" + (d.size ? "" : " leaf"); })
+                .attr("r", function (d) {
+                    if (d.size > 0) return Math.ceil(Math.log(d.size)) + 5;
+                    else return 5;
+                })
+                .attr("cx", function (d) { return d.x; })
+                .attr("cy", function (d) { return d.y; })
+                .style("fill", function (d) { return "gray"; })
+                .style("stroke", function (d) {
+                    if (d.size != 1) return "black";
+                    return "white";
+                })
+                .style("stroke-width", function (d) { return 2; })
+                .on("click", function (d, i) {
+                    var grp = expanded.get(d.group);
+                    if (!grp) {
+                        expanded.set(d.group, true);
+                        console.log("点击了", d, "想要展开");
+                        expand(d, i);
+                    }
+                    else {
+                        expanded.set(d.group, false);
+                        console.log("点击了", d, "想要收缩");
+                        collapse(d, i);
+                    }
+                    draw();
+                })
+                .call(
+                    d3.drag()
+                        .on("start", dragstarted)
+                        .on("drag", dragged)
+                        .on("end", dragended)
+                );
+        };
+        function dragstarted(d) {
+            if (!d3.event.active) simulation.alphaTarget(0.3).restart();
+            d.fy = d.y;
+            d.fx = d.x;
+        }
+        function dragged(d) {
+            d.fx = d3.event.x;
+            d.fy = d3.event.y;
+        }
+        function dragended(d) {
+            if (!d3.event.active) {
+                simulation.alphaTarget(0);
+            }
+        }
+    </script>
+</body>
