@@ -170,7 +170,7 @@
             for (let k = 0; k < dNodeLen; k++) {
                 let snode = d.nodes[k];
                 snode.size = 1;
-                snode.x = d.x + Math.random(), snode.y = d.y + Math.random(); //节点的位置
+                snode.x = d.x + 10*Math.random(), snode.y = d.y + 10*Math.random(); //节点的位置
                 snode.vx = Math.random(), snode.vy = Math.random(); //节点的移动速度
                 groupedData.nodes.push(snode);
             }
